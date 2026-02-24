@@ -1,0 +1,134 @@
+{
+  "scenarios": {
+    "messy_export": {
+      "accounts_cleaned": 800
+    },
+    "fuzzy_mapping": {
+      "total_matches": 50,
+      "top_matches": [
+        {
+          "value_a": "Salesforce 48 Inc.",
+          "value_b": "Salesforce 48",
+          "similarity": 83.87096774193549,
+          "matching_blocks": [
+            {
+              "content": "Salesforce 48",
+              "size": 13
+            }
+          ],
+          "alignment": [
+            {
+              "op": "delete",
+              "a": " Inc.",
+              "b": ""
+            }
+          ]
+        },
+        {
+          "value_a": "Salesforce 49 Inc.",
+          "value_b": "Salesforce 49",
+          "similarity": 83.87096774193549,
+          "matching_blocks": [
+            {
+              "content": "Salesforce 49",
+              "size": 13
+            }
+          ],
+          "alignment": [
+            {
+              "op": "delete",
+              "a": " Inc.",
+              "b": ""
+            }
+          ]
+        },
+        {
+          "value_a": "Salesforce 5 Inc.",
+          "value_b": "Salesforce 5",
+          "similarity": 82.75862068965517,
+          "matching_blocks": [
+            {
+              "content": "Salesforce 5",
+              "size": 12
+            }
+          ],
+          "alignment": [
+            {
+              "op": "delete",
+              "a": " Inc.",
+              "b": ""
+            }
+          ]
+        },
+        {
+          "value_a": "Salesforce 16 Corp.",
+          "value_b": "Salesforce 16",
+          "similarity": 81.25,
+          "matching_blocks": [
+            {
+              "content": "Salesforce 16",
+              "size": 13
+            }
+          ],
+          "alignment": [
+            {
+              "op": "delete",
+              "a": " Corp.",
+              "b": ""
+            }
+          ]
+        },
+        {
+          "value_a": "Salesforce 27 Corp.",
+          "value_b": "Salesforce 27",
+          "similarity": 81.25,
+          "matching_blocks": [
+            {
+              "content": "Salesforce 27",
+              "size": 13
+            }
+          ],
+          "alignment": [
+            {
+              "op": "delete",
+              "a": " Corp.",
+              "b": ""
+            }
+          ]
+        }
+      ]
+    },
+    "transaction_audit": {
+      "statistics": {
+        "orphans_only_in_source_a": 4,
+        "orphans_only_in_source_b": 0,
+        "total_orphans": 4,
+        "conflicts": 0,
+        "exact_matches": 1194,
+        "match_rate_percent": 100.0
+      }
+    },
+    "revenue_integrity": {
+      "total_conflicts": 10,
+      "conflicts": [
+        {
+          "opportunity_id": "OPP-10815",
+          "crm_amount": 2944.43,
+          "erp_amount": 2797.21
+        },
+        {
+          "opportunity_id": "OPP-10091",
+          "crm_amount": 15565.11,
+          "erp_amount": 14786.85
+        },
+        {
+          "opportunity_id": "OPP-10415",
+          "crm_amount": 1775.03,
+          "erp_amount": 1686.28
+        }
+      ]
+    }
+  },
+  "tour_version": "1985",
+  "exported_at": "2026-02-24T16:00:07.298691"
+}
