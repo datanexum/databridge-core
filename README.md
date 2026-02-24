@@ -1,11 +1,15 @@
 # DataBridge Core
 
+[![PyPI version](https://img.shields.io/pypi/v/databridge-core)](https://pypi.org/project/databridge-core/)
+[![Python](https://img.shields.io/pypi/pyversions/databridge-core)](https://pypi.org/project/databridge-core/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 **Your finance team just spent 4 hours on VLOOKUP. This takes 5 seconds.**
 
 DataBridge Core is a Python toolkit for data reconciliation, profiling, and ingestion. Compare CSV files, find fuzzy matches, detect schema drift, and clean messy data -- from the command line or Python.
 
 ```bash
-pip install databridge-core
+pip install databridge-core  # v1.0.0
 ```
 
 ## 5-Second Demo
@@ -68,6 +72,14 @@ pip install 'databridge-core[dev]'     # Development tools (pytest, ruff, build)
 DataBridge Core is the open-source foundation of [DataBridge AI](https://github.com/datanexum/databridge-ai) -- a full platform for financial hierarchy management, dbt model generation, and enterprise data reconciliation.
 
 **How it works:** Upload your Chart of Accounts. Get a production-ready financial hierarchy and dbt models. Zero config.
+
+## Changelog
+
+### v1.0.0 (2026-02-24)
+- Initial public release on PyPI
+- 9 CLI commands: profile, compare, fuzzy, diff, drift, transform, merge, find, parse
+- 16 Python API functions
+- Python 3.10 - 3.13
 
 ## License
 
