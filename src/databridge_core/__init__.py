@@ -14,7 +14,7 @@ Quick start::
     print(comparison["statistics"]["match_rate_percent"], "% match rate")
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 # Reconciler
 from .reconciler import (
