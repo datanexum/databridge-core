@@ -1,0 +1,10 @@
+id,name,email,city,balance
+1,Alice Johnson,alice@example.com,New York,1500.00
+2,Bob Smith,bob@example.com,Chicago,2400.50
+3,Charles Brown,charlie@example.com,Houston,850.75
+4,Diana Prince,diana@example.com,Scottsdale,3200.00
+5,Eve Williams,eve@example.com,San Antonio,1100.25
+6,Frank Castle,frank@example.com,Dallas,4500.00
+7,Grace Hopper,grace@example.com,San Jose,2750.30
+8,Hank Pym,hank@example.com,Austin,990.00
+11,Kate Bishop,kate@example.com,Denver,2100.00
