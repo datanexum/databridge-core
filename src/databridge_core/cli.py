@@ -401,3 +401,371 @@ def parse(text, file, delimiter):
         table.add_row(*[str(row.get(c, "")) for c in result["columns"]])
 
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# Detection commands
+# ---------------------------------------------------------------------------
+
+
+@cli.command("erp-detect")
+@click.argument("file_or_dir", type=click.Path(exists=True))
+@click.option("--pattern", "-p", default="*.csv", help="Glob pattern for batch mode.")
+@click.option("--limit", "-n", default=0, help="Max files for batch mode (0 = unlimited).")
+@click.option("--all-scores", is_flag=True, help="Show scores for all ERP systems.")
+def erp_detect(file_or_dir, pattern, limit, all_scores):
+    """Detect source ERP system from COA file fingerprints."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from .erp_detect import detect_erp, detect_erp_batch
+
+    console = Console()
+    target = Path(file_or_dir)
+
+    if target.is_file():
+        with console.status("Analyzing file..."):
+            result = detect_erp(str(target), return_all_scores=all_scores)
+
+        if result.get("error"):
+            console.print(f"[red]Error: {result['error']}[/red]")
+            raise SystemExit(1)
+
+        style = "green" if result["confidence"] >= 0.5 else (
+            "yellow" if result["confidence"] >= 0.2 else "red"
+        )
+        console.print(Panel(
+            f"[bold]ERP:[/bold] [{style}]{result['detected_erp']}[/{style}]  |  "
+            f"Confidence: [{style}]{result['confidence']:.0%}[/{style}]  |  "
+            f"Columns: {result['columns_found']}  |  "
+            f"Ambiguous: {'Yes' if result.get('ambiguous') else 'No'}",
+            title=f"ERP Detection: {result['file']}",
+        ))
+
+        if result.get("signals"):
+            for signal in result["signals"]:
+                console.print(f"  [dim]{signal}[/dim]")
+
+        if all_scores and result.get("all_scores"):
+            table = Table(title="All Scores")
+            table.add_column("ERP", style="cyan")
+            table.add_column("Score", justify="right")
+            table.add_column("Confidence", justify="right")
+            table.add_column("Strong Matches", justify="right")
+
+            for s in result["all_scores"]:
+                table.add_row(s["erp"], f"{s['score']:.1f}", f"{s['confidence']:.0%}", str(s["strong_matches"]))
+
+            console.print(table)
+    else:
+        with console.status("Scanning directory..."):
+            result = detect_erp_batch(str(target), pattern=pattern, limit=limit)
+
+        if result.get("error"):
+            console.print(f"[red]Error: {result['error']}[/red]")
+            raise SystemExit(1)
+
+        console.print(Panel(
+            f"[bold]Scanned {result['total_files']} files[/bold]  |  "
+            f"Errors: {result['errors']}",
+            title="ERP Detection: Batch",
+        ))
+
+        if result.get("erp_distribution"):
+            table = Table(title="ERP Distribution")
+            table.add_column("ERP", style="cyan")
+            table.add_column("Count", justify="right", style="bold")
+            table.add_column("Avg Confidence", justify="right")
+
+            for erp, count in sorted(result["erp_distribution"].items(), key=lambda x: -x[1]):
+                avg = result["avg_confidence"].get(erp, 0)
+                table.add_row(erp, str(count), f"{avg:.0%}")
+
+            console.print(table)
+
+
+@cli.command("fraud-detect")
+@click.argument("file_or_dir", type=click.Path(exists=True))
+@click.option("--checks", "-c", default="", help="Comma-separated checks (default: all 6).")
+@click.option("--limit", "-n", default=0, help="Max files for batch mode (0 = unlimited).")
+def fraud_detect(file_or_dir, checks, limit):
+    """Scan transaction data for fraud indicators (6 pattern types)."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from .fraud_detect import detect_fraud, detect_fraud_batch
+
+    console = Console()
+    target = Path(file_or_dir)
+    check_list = [c.strip() for c in checks.split(",") if c.strip()] or None
+
+    if target.is_file():
+        with console.status("Scanning for fraud indicators..."):
+            result = detect_fraud(str(target), checks=check_list)
+
+        if result.get("error"):
+            console.print(f"[red]Error: {result['error']}[/red]")
+            raise SystemExit(1)
+
+        risk = result["risk_score"]
+        style = "red" if risk >= 50 else ("yellow" if risk >= 20 else "green")
+
+        console.print(Panel(
+            f"[bold]File:[/bold] {result['file']}  |  "
+            f"Rows: {result['rows_analyzed']:,}  |  "
+            f"Risk Score: [{style}]{risk}/100[/{style}]  |  "
+            f"Findings: {result['findings_count']}",
+            title="Fraud Detection",
+        ))
+
+        if result["findings"]:
+            table = Table(title="Findings")
+            table.add_column("Type", style="cyan")
+            table.add_column("Severity")
+            table.add_column("Evidence", overflow="fold")
+
+            for f in result["findings"]:
+                sev = f.get("severity", "")
+                sev_style = "red" if sev == "CRITICAL" else ("yellow" if sev == "HIGH" else "dim")
+                table.add_row(
+                    f.get("type", ""),
+                    f"[{sev_style}]{sev}[/{sev_style}]",
+                    f.get("evidence", ""),
+                )
+
+            console.print(table)
+        else:
+            console.print("[green]No fraud indicators detected.[/green]")
+    else:
+        with console.status("Scanning directory..."):
+            result = detect_fraud_batch(str(target), limit=limit)
+
+        if result.get("error"):
+            console.print(f"[red]Error: {result['error']}[/red]")
+            raise SystemExit(1)
+
+        console.print(Panel(
+            f"[bold]Scanned {result['total_files']} files[/bold]  |  "
+            f"Total findings: {result['total_findings']}  |  "
+            f"Avg per file: {result['avg_findings_per_file']}",
+            title="Fraud Detection: Batch",
+        ))
+
+        if result.get("by_type"):
+            table = Table(title="Findings by Type")
+            table.add_column("Type", style="cyan")
+            table.add_column("Count", justify="right", style="bold")
+
+            for ftype, count in sorted(result["by_type"].items(), key=lambda x: -x[1]):
+                table.add_row(ftype, str(count))
+
+            console.print(table)
+
+        if result.get("high_risk_files"):
+            table = Table(title="High-Risk Files (score >= 50)")
+            table.add_column("File", style="red")
+            table.add_column("Risk Score", justify="right")
+            table.add_column("Findings", justify="right")
+
+            for f in result["high_risk_files"]:
+                table.add_row(f["file"], str(f["risk_score"]), str(f["findings"]))
+
+            console.print(table)
+
+
+@cli.command("fx-validate")
+@click.argument("file_or_dir", type=click.Path(exists=True))
+@click.option("--limit", "-n", default=0, help="Max files for batch mode (0 = unlimited).")
+def fx_validate(file_or_dir, limit):
+    """Validate FX translation rates in multi-currency trial balances."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from .fx_validate import validate_fx, validate_fx_batch
+
+    console = Console()
+    target = Path(file_or_dir)
+
+    if target.is_file():
+        with console.status("Validating FX rates..."):
+            result = validate_fx(str(target))
+
+        if result.get("error"):
+            console.print(f"[red]Error: {result['error']}[/red]")
+            raise SystemExit(1)
+
+        risk = result.get("risk_score", 0)
+        style = "red" if risk >= 50 else ("yellow" if risk >= 20 else "green")
+
+        console.print(Panel(
+            f"[bold]File:[/bold] {result['file']}  |  "
+            f"Currencies: {result.get('functional_currency', '?')} -> {result.get('reporting_currency', '?')}  |  "
+            f"Accounts: {result['accounts_checked']}  |  "
+            f"Risk: [{style}]{risk}/100[/{style}]  |  "
+            f"Findings: {result['findings_count']}",
+            title="FX Validation",
+        ))
+
+        if result["findings"]:
+            table = Table(title="Findings")
+            table.add_column("Type", style="cyan")
+            table.add_column("Severity")
+            table.add_column("Account")
+            table.add_column("Evidence", overflow="fold")
+
+            for f in result["findings"]:
+                sev = f.get("severity", "")
+                sev_style = "red" if sev == "CRITICAL" else ("yellow" if sev == "HIGH" else "dim")
+                table.add_row(
+                    f.get("type", ""),
+                    f"[{sev_style}]{sev}[/{sev_style}]",
+                    f.get("account", ""),
+                    f.get("evidence", ""),
+                )
+
+            console.print(table)
+        else:
+            console.print("[green]No FX issues detected.[/green]")
+    else:
+        with console.status("Scanning directory..."):
+            result = validate_fx_batch(str(target), limit=limit)
+
+        if result.get("error"):
+            console.print(f"[red]Error: {result['error']}[/red]")
+            raise SystemExit(1)
+
+        console.print(Panel(
+            f"[bold]Scanned {result['total_files']} files[/bold]  |  "
+            f"Files with issues: {result['files_with_issues']}  |  "
+            f"Total findings: {result['total_findings']}",
+            title="FX Validation: Batch",
+        ))
+
+        if result.get("by_type"):
+            table = Table(title="Findings by Type")
+            table.add_column("Type", style="cyan")
+            table.add_column("Count", justify="right", style="bold")
+
+            for ftype, count in sorted(result["by_type"].items(), key=lambda x: -x[1]):
+                table.add_row(ftype, str(count))
+
+            console.print(table)
+
+        if result.get("problem_files"):
+            table = Table(title="Problem Files")
+            table.add_column("File", style="red")
+            table.add_column("Currencies")
+            table.add_column("Findings", justify="right")
+            table.add_column("Risk", justify="right")
+
+            for f in result["problem_files"]:
+                table.add_row(f["file"], f.get("currencies", ""), str(f["findings"]), str(f["risk_score"]))
+
+            console.print(table)
+
+
+@cli.command("standards-check")
+@click.argument("file_or_dir", type=click.Path(exists=True))
+@click.option("--standard", "-s", default=None,
+              type=click.Choice(["US_GAAP", "IFRS", "JGAAP", "DUAL"], case_sensitive=False),
+              help="Override standard (default: auto-detect).")
+@click.option("--limit", "-n", default=0, help="Max files for batch mode (0 = unlimited).")
+def standards_check(file_or_dir, standard, limit):
+    """Check COA files for GAAP/IFRS/J-GAAP compliance violations."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from .standards_check import check_standards, check_standards_batch
+
+    console = Console()
+    target = Path(file_or_dir)
+
+    if target.is_file():
+        with console.status("Checking standards compliance..."):
+            result = check_standards(str(target), target_standard=standard)
+
+        if result.get("error"):
+            console.print(f"[red]Error: {result['error']}[/red]")
+            raise SystemExit(1)
+
+        score = result.get("compliance_score", 0)
+        style = "green" if score >= 80 else ("yellow" if score >= 50 else "red")
+
+        console.print(Panel(
+            f"[bold]File:[/bold] {result['file']}  |  "
+            f"Standard: {result['detected_standard']}  |  "
+            f"Accounts: {result['accounts_checked']}  |  "
+            f"Compliance: [{style}]{score}/100[/{style}]  |  "
+            f"Findings: {result['findings_count']}",
+            title="Standards Compliance",
+        ))
+
+        if result["findings"]:
+            table = Table(title="Findings")
+            table.add_column("Type", style="cyan")
+            table.add_column("Severity")
+            table.add_column("Account")
+            table.add_column("Issue", overflow="fold")
+
+            for f in result["findings"]:
+                sev = f.get("severity", "")
+                sev_style = "red" if sev == "CRITICAL" else (
+                    "yellow" if sev == "HIGH" else "dim"
+                )
+                table.add_row(
+                    f.get("type", ""),
+                    f"[{sev_style}]{sev}[/{sev_style}]",
+                    f.get("account", ""),
+                    f.get("issue", ""),
+                )
+
+            console.print(table)
+        else:
+            console.print("[green]Fully compliant. No issues found.[/green]")
+    else:
+        with console.status("Scanning directory..."):
+            result = check_standards_batch(str(target), target_standard=standard, limit=limit)
+
+        if result.get("error"):
+            console.print(f"[red]Error: {result['error']}[/red]")
+            raise SystemExit(1)
+
+        avg = result.get("avg_compliance_score", 0)
+        style = "green" if avg >= 80 else ("yellow" if avg >= 50 else "red")
+
+        console.print(Panel(
+            f"[bold]Scanned {result['total_files']} files[/bold]  |  "
+            f"Non-compliant: {result['non_compliant_files']}  |  "
+            f"Total findings: {result['total_findings']}  |  "
+            f"Avg score: [{style}]{avg}[/{style}]",
+            title="Standards Compliance: Batch",
+        ))
+
+        if result.get("by_standard"):
+            table = Table(title="Files by Standard")
+            table.add_column("Standard", style="cyan")
+            table.add_column("Count", justify="right", style="bold")
+
+            for std, count in sorted(result["by_standard"].items(), key=lambda x: -x[1]):
+                table.add_row(std, str(count))
+
+            console.print(table)
+
+        if result.get("non_compliant_files_detail"):
+            table = Table(title="Non-Compliant Files")
+            table.add_column("File", style="red")
+            table.add_column("Standard")
+            table.add_column("Findings", justify="right")
+            table.add_column("Score", justify="right")
+
+            for f in result["non_compliant_files_detail"]:
+                table.add_row(
+                    f["file"], f.get("standard", ""), str(f["findings"]),
+                    str(f.get("compliance_score", 0)),
+                )
+
+            console.print(table)

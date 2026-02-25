@@ -14,7 +14,7 @@ Quick start::
     print(comparison["statistics"]["match_rate_percent"], "% match rate")
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 # Reconciler
 from .reconciler import (
@@ -47,6 +47,12 @@ from .templates import TemplateService, FinancialTemplate
 
 # Integrations (always available — stdlib only)
 from .integrations import BaseClient, SlackClient
+
+# Detection modules (always available — stdlib only)
+from .erp_detect import detect_erp, detect_erp_batch
+from .fraud_detect import detect_fraud, detect_fraud_batch
+from .fx_validate import validate_fx, validate_fx_batch
+from .standards_check import check_standards, check_standards_batch
 
 # Triage (lazy — requires openpyxl)
 def scan_and_classify(*args, **kwargs):
@@ -87,6 +93,15 @@ __all__ = [
     # Integrations
     "BaseClient",
     "SlackClient",
+    # Detection
+    "detect_erp",
+    "detect_erp_batch",
+    "detect_fraud",
+    "detect_fraud_batch",
+    "validate_fx",
+    "validate_fx_batch",
+    "check_standards",
+    "check_standards_batch",
     # Triage
     "scan_and_classify",
 ]

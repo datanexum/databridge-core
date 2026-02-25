@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "databridge-core"
-version = "1.2.0"
+version = "1.3.0"
 description = "Upload your Chart of Accounts. Get a production-ready financial hierarchy and dbt models. Zero config."
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "DataBridge AI", email = "hello@databridgeai.com" },
 ]
-keywords = ["data", "reconciliation", "profiling", "etl", "finance", "csv", "diff", "fuzzy-match", "triage", "excel", "slack", "templates"]
+keywords = ["data", "reconciliation", "profiling", "etl", "finance", "csv", "diff", "fuzzy-match", "triage", "excel", "slack", "templates", "erp-detection", "fraud-detection", "fx-validation", "gaap", "ifrs"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
