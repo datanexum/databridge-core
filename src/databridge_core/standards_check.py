@@ -133,21 +133,26 @@ def _read_csv(path: str) -> tuple:
                 lines = f.readlines()
 
             # Scan header comments for standard
+            # Collect all header lines first, then determine standard with priority
             data_start = 0
+            header_text = ""
             for i, line in enumerate(lines):
                 stripped = line.strip()
                 if stripped.startswith("#") or not stripped:
                     data_start = i + 1
-                    if "US GAAP" in stripped or "ASC" in stripped or "FASB" in stripped:
-                        detected_standard = "US_GAAP"
-                    elif "IFRS" in stripped:
-                        detected_standard = "IFRS"
-                    elif "J-GAAP" in stripped or "Kigyo Kaikei" in stripped:
-                        detected_standard = "JGAAP"
-                    elif "Dual" in stripped:
-                        detected_standard = "DUAL"
+                    header_text += stripped + "\n"
                     continue
                 break
+
+            # Dual takes priority (dual files mention both GAAP and IFRS)
+            if "Dual" in header_text or "Reconciliation:" in header_text:
+                detected_standard = "DUAL"
+            elif "J-GAAP" in header_text or "Kigyo Kaikei" in header_text:
+                detected_standard = "JGAAP"
+            elif "US GAAP" in header_text or ("ASC" in header_text and "IFRS" not in header_text) or "FASB" in header_text:
+                detected_standard = "US_GAAP"
+            elif "IFRS" in header_text:
+                detected_standard = "IFRS"
 
             reader = csv.DictReader(lines[data_start:])
             rows = list(reader)
@@ -279,6 +284,34 @@ def check_standards(
                     "reference": std_ref,
                 })
 
+        # 5. Misclassification checks
+        acct_type = row.get("Account_Type", "")
+        if standard == "US_GAAP":
+            # Capitalized development costs should be expensed under GAAP (ASC 730)
+            if re.search(r"(?i)capitaliz.*development|development.*capitaliz", acct_name):
+                findings.append({
+                    "type": "STANDARD_MISCLASSIFICATION",
+                    "severity": "CRITICAL",
+                    "account": row.get("Account_ID", ""),
+                    "account_name": acct_name,
+                    "issue": "Development costs capitalized under US GAAP — should be expensed per ASC 730",
+                    "reference": "ASCComponentModel730",
+                })
+
+        # 6. Opportunity checks (things that could be treated differently)
+        if standard == "IFRS":
+            # R&D fully expensed when development portion could be capitalized
+            if re.search(r"(?i)^Research and Development$|^R&D Expense$", acct_name):
+                if acct_type == "Expense":
+                    findings.append({
+                        "type": "STANDARD_OPPORTUNITY",
+                        "severity": "MEDIUM",
+                        "account": row.get("Account_ID", ""),
+                        "account_name": acct_name,
+                        "issue": "All R&D expensed under IFRS — eligible development costs should be capitalized per IAS 38.57",
+                        "reference": "IAS 38",
+                    })
+
     # 5. Dual-reporting reconciliation check
     if standard == "DUAL":
         for row in rows:
@@ -301,6 +334,36 @@ def check_standards(
                         "difference": round(ifrs_bal - expected, 2),
                         "issue": f"GAAP({gaap_bal}) + Adj({ifrs_adj}) = {expected}, but IFRS shows {ifrs_bal}",
                     })
+
+    # Deduplication: suppress secondary findings when primary violation exists.
+    # WRONG_STANDARD_REF and TERMINOLOGY_MISMATCH are redundant when a
+    # STANDARD_VIOLATION or STANDARD_MISCLASSIFICATION already covers the account.
+    violation_accounts = {
+        f["account"] for f in findings
+        if f["type"] in ("STANDARD_VIOLATION", "STANDARD_MISCLASSIFICATION")
+    }
+    if violation_accounts:
+        findings = [
+            f for f in findings
+            if not (
+                f["type"] in ("WRONG_STANDARD_REF", "TERMINOLOGY_MISMATCH")
+                and f.get("account") in violation_accounts
+            )
+        ]
+    # STANDARD_MISCLASSIFICATION is more specific than STANDARD_VIOLATION for the
+    # same account — remove the less-specific duplicate.
+    misclass_accounts = {
+        f["account"] for f in findings
+        if f["type"] == "STANDARD_MISCLASSIFICATION"
+    }
+    if misclass_accounts:
+        findings = [
+            f for f in findings
+            if not (
+                f["type"] == "STANDARD_VIOLATION"
+                and f.get("account") in misclass_accounts
+            )
+        ]
 
     # Compliance score (100 = fully compliant)
     penalty = 0

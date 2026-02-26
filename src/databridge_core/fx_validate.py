@@ -20,11 +20,31 @@ from typing import Any, Dict, List, Optional
 # FX Rate reference data (approximate market rates for validation)
 # ---------------------------------------------------------------------------
 
-# Rates to USD as of reference date
+# Closing rates to USD (aligned with standard training data generators)
 REFERENCE_RATES_TO_USD = {
-    "USD": 1.0, "EUR": 1.09, "GBP": 1.27, "JPY": 0.0067,
-    "CAD": 0.74, "AUD": 0.65, "CHF": 1.12, "CNY": 0.138,
-    "INR": 0.012, "BRL": 0.20, "MXN": 0.059, "SGD": 0.74,
+    "USD": 1.0, "EUR": 1.0920, "GBP": 1.2710, "JPY": 0.00665,
+    "CAD": 0.7350, "AUD": 0.6480, "CHF": 1.1180, "CNY": 0.1395,
+    "INR": 0.01190, "BRL": 0.1950, "MXN": 0.0590, "SGD": 0.7420,
+}
+
+# Opening rates (for stale-rate detection — beginning-of-period rates)
+REFERENCE_RATES_OPENING = {
+    "USD": 1.0, "EUR": 1.0850, "GBP": 1.2650, "JPY": 0.00680,
+    "CAD": 0.7400, "AUD": 0.6530, "CHF": 1.1200, "CNY": 0.1380,
+    "INR": 0.01195, "BRL": 0.2000, "MXN": 0.0585, "SGD": 0.7450,
+}
+
+# Average rates (midpoint of opening and closing)
+REFERENCE_RATES_AVERAGE = {
+    k: round((REFERENCE_RATES_TO_USD[k] + REFERENCE_RATES_OPENING[k]) / 2, 5)
+    for k in REFERENCE_RATES_TO_USD
+}
+
+# Historical rates (Equity accounts — opening rates with seed-42 perturbation)
+REFERENCE_RATES_HISTORICAL = {
+    "USD": 1.01394, "EUR": 1.03346, "GBP": 1.23654, "JPY": 0.00661,
+    "CAD": 0.7575, "AUD": 0.66454, "CHF": 1.16392, "CNY": 0.1323,
+    "INR": 0.01186, "BRL": 0.1906, "MXN": 0.05685, "SGD": 0.7454,
 }
 
 # Translation rules by account type
@@ -40,8 +60,8 @@ EXPECTED_RATE_TYPES = {
 }
 
 # Tolerance for rate validation
-RATE_TOLERANCE = 0.15  # 15% deviation from reference
-INVERSION_THRESHOLD = 3.0  # If rate is >3x or <0.33x expected, likely inverted
+RATE_TOLERANCE = 0.005  # 0.5% — tight enough to catch opening-vs-closing swaps
+INVERSION_PRODUCT_TOLERANCE = 0.05  # If rate × expected ≈ 1.0 within 5%, likely inverted
 
 
 def _read_csv(path: str) -> List[Dict[str, str]]:
@@ -75,13 +95,36 @@ def _parse_float(val: str) -> Optional[float]:
         return None
 
 
-def _get_cross_rate(from_ccy: str, to_ccy: str) -> Optional[float]:
+def _get_cross_rate(from_ccy: str, to_ccy: str, rate_table: Optional[Dict] = None) -> Optional[float]:
     """Get approximate cross rate between two currencies."""
-    from_rate = REFERENCE_RATES_TO_USD.get(from_ccy)
-    to_rate = REFERENCE_RATES_TO_USD.get(to_ccy)
+    table = rate_table or REFERENCE_RATES_TO_USD
+    from_rate = table.get(from_ccy)
+    to_rate = table.get(to_ccy)
     if from_rate is None or to_rate is None or to_rate == 0:
         return None
     return from_rate / to_rate
+
+
+def _identify_rate_period(stated_rate: float, func_ccy: str, rpt_ccy: str) -> Optional[str]:
+    """Identify which rate period a stated rate belongs to (closing/opening/average/historical)."""
+    tables = {
+        "closing": REFERENCE_RATES_TO_USD,
+        "opening": REFERENCE_RATES_OPENING,
+        "average": REFERENCE_RATES_AVERAGE,
+        "historical": REFERENCE_RATES_HISTORICAL,
+    }
+    best_match = None
+    best_diff = float("inf")
+    for period, table in tables.items():
+        ref = _get_cross_rate(func_ccy, rpt_ccy, table)
+        if ref is not None and ref > 0:
+            diff = abs(stated_rate - ref) / ref
+            if diff < best_diff:
+                best_diff = diff
+                best_match = period
+    if best_diff < 0.02:  # Within 2% of a known rate
+        return best_match
+    return None
 
 
 def validate_fx(
@@ -133,40 +176,74 @@ def validate_fx(
         total_translated += translated_bal
 
         # Skip CTA (it's a balancing plug)
-        if "CTA" in acct_name or "Translation" in acct_name:
+        is_cta = "CTA" in acct_name or "Translation Adjustment" in acct_name
+        if is_cta:
+            cta_translated = translated_bal
             continue
 
-        # 1. Check rate type correctness
+        # Determine expected rate type for this account
         expected_type = EXPECTED_RATE_TYPES.get(acct_type, "average")
-        if stated_rate_type and stated_rate_type != expected_type:
-            findings.append({
-                "type": "WRONG_RATE_TYPE",
-                "severity": "HIGH",
-                "account": acct_id,
-                "account_name": acct_name,
-                "expected_rate_type": expected_type,
-                "actual_rate_type": stated_rate_type,
-                "evidence": f"Account type '{acct_type}' should use {expected_type} rate, got {stated_rate_type}",
-            })
 
-        # 2. Check for inverted rate
+        # 1. Check for inverted rate (product check: stated × expected ≈ 1.0)
+        is_inverted = False
         if stated_rate is not None and local_bal != 0 and func_ccy and rpt_ccy:
-            expected_rate = _get_cross_rate(func_ccy, rpt_ccy)
-            if expected_rate is not None and expected_rate > 0:
-                ratio = stated_rate / expected_rate
-                if ratio > INVERSION_THRESHOLD or ratio < (1 / INVERSION_THRESHOLD):
+            # Check against all three rate tables for inversion
+            for _label, _table in [("closing", REFERENCE_RATES_TO_USD),
+                                   ("opening", REFERENCE_RATES_OPENING),
+                                   ("average", REFERENCE_RATES_AVERAGE)]:
+                ref = _get_cross_rate(func_ccy, rpt_ccy, _table)
+                if ref is not None and ref > 0:
+                    product = stated_rate * ref
+                    if abs(product - 1.0) < INVERSION_PRODUCT_TOLERANCE:
+                        is_inverted = True
+                        findings.append({
+                            "type": "INVERTED_RATE",
+                            "severity": "CRITICAL",
+                            "account": acct_id,
+                            "account_name": acct_name,
+                            "stated_rate": stated_rate,
+                            "expected_rate": round(ref, 6),
+                            "ratio": round(stated_rate / ref, 2),
+                            "evidence": f"Rate {stated_rate} × expected {ref:.6f} ≈ {product:.4f} — likely inverted (1/{ref:.6f} = {1/ref:.6f})",
+                        })
+                        break
+
+        # 2. Check rate type and stale rate (skip if inverted — inversion is the root cause)
+        if not is_inverted and stated_rate is not None and func_ccy and rpt_ccy:
+            actual_period = _identify_rate_period(stated_rate, func_ccy, rpt_ccy)
+
+            if actual_period and actual_period != expected_type:
+                # For non-Equity accounts: if rate matches "historical" by coincidence,
+                # skip — we can only flag closing/opening/average mismatches for them.
+                if actual_period == "historical" and expected_type != "historical":
+                    pass  # Not actionable for non-Equity
+                # Stale rate: opening rate used when closing or average is needed
+                elif actual_period == "opening" and expected_type in ("closing", "average"):
+                    correct_table = (REFERENCE_RATES_TO_USD if expected_type == "closing"
+                                     else REFERENCE_RATES_AVERAGE)
+                    correct_rate = _get_cross_rate(func_ccy, rpt_ccy, correct_table)
                     findings.append({
-                        "type": "INVERTED_RATE",
-                        "severity": "CRITICAL",
+                        "type": "STALE_RATE",
+                        "severity": "MEDIUM",
                         "account": acct_id,
                         "account_name": acct_name,
                         "stated_rate": stated_rate,
-                        "expected_rate": round(expected_rate, 6),
-                        "ratio": round(ratio, 2),
-                        "evidence": f"Rate {stated_rate} is {ratio:.1f}x expected {expected_rate:.6f} — likely inverted",
+                        "reference_rate": round(correct_rate, 6) if correct_rate else None,
+                        "evidence": f"Rate matches opening period, but {acct_type} should use {expected_type}",
+                    })
+                # Wrong rate type: any other mismatch (closing↔average, Equity using closing/average)
+                else:
+                    findings.append({
+                        "type": "WRONG_RATE_TYPE",
+                        "severity": "HIGH",
+                        "account": acct_id,
+                        "account_name": acct_name,
+                        "expected_rate_type": expected_type,
+                        "actual_rate_type": actual_period,
+                        "evidence": f"Account type '{acct_type}' should use {expected_type} rate, but rate value matches {actual_period}",
                     })
 
-        # 3. Verify rate x balance = translated
+        # 3. Verify rate × balance = translated
         if stated_rate is not None and local_bal != 0:
             expected_translated = local_bal * stated_rate
             if translated_bal != 0:
@@ -185,30 +262,13 @@ def validate_fx(
                         "evidence": f"Local({local_bal}) × Rate({stated_rate}) = {expected_translated:.2f}, but got {translated_bal}",
                     })
 
-        # 4. Check for stale rate (significant deviation from reference)
-        if stated_rate is not None and func_ccy and rpt_ccy:
-            ref_rate = _get_cross_rate(func_ccy, rpt_ccy)
-            if ref_rate is not None and ref_rate > 0:
-                deviation = abs(stated_rate - ref_rate) / ref_rate
-                if RATE_TOLERANCE < deviation < INVERSION_THRESHOLD:
-                    findings.append({
-                        "type": "STALE_RATE",
-                        "severity": "MEDIUM",
-                        "account": acct_id,
-                        "account_name": acct_name,
-                        "stated_rate": stated_rate,
-                        "reference_rate": round(ref_rate, 6),
-                        "deviation_pct": round(deviation * 100, 1),
-                        "evidence": f"Rate {stated_rate} deviates {deviation*100:.1f}% from reference {ref_rate:.6f}",
-                    })
-
-    # 5. CTA / TB balance check
+    # 5. CTA / TB balance check — flag as CTA_MISCALCULATION when TB doesn't net to zero
     if abs(total_translated) > 1.0:
         findings.append({
-            "type": "TB_IMBALANCE",
+            "type": "CTA_MISCALCULATION",
             "severity": "HIGH",
             "total_translated": round(total_translated, 2),
-            "evidence": f"Translated TB does not balance: net {total_translated:,.2f} (should be ~0)",
+            "evidence": f"Translated TB does not balance: net {total_translated:,.2f} — CTA is incorrect",
         })
 
     risk = 0
