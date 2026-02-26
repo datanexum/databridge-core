@@ -66,6 +66,19 @@ slack.send_message("#data-ops", "Reconciliation complete: 99.5% match rate")
 slack.post_reconciliation_report("#data-ops", result)
 ```
 
+### Grounded Anomaly Detection
+
+```python
+from databridge_core.detection import detect_grounded, record_feedback
+
+# Detect anomalies grounded in Knowledge Base rules
+result = detect_grounded("trial_balance.csv", knowledge_dir="data/knowledge/")
+print(f"{result['total_findings']} findings from {result['summary']['rules_applied']} KB rules")
+
+# User feedback loop — improve detection over time
+record_feedback("finding_abc123", confirmed=True, notes="Real sign reversal")
+```
+
 ### Excel Triage
 
 ```python
@@ -99,6 +112,7 @@ pip install 'databridge-core[pdf]'      # PDF text extraction (pypdf)
 pip install 'databridge-core[ocr]'      # OCR image extraction (pytesseract)
 pip install 'databridge-core[sql]'      # Database queries (sqlalchemy)
 pip install 'databridge-core[triage]'   # Excel triage scanning (openpyxl)
+pip install 'databridge-core[detection]' # AI verification pipeline (langgraph, langchain)
 pip install 'databridge-core[all]'      # Everything
 pip install 'databridge-core[dev]'      # Development tools (pytest, ruff, build)
 ```
@@ -113,10 +127,11 @@ pip install 'databridge-core[dev]'      # Development tools (pytest, ruff, build
 | `templates` | Industry hierarchy templates, skills, knowledge base | - |
 | `integrations` | Slack client (BaseClient + SlackClient) | - |
 | `triage` | Batch Excel scanning and archetype classification | `[triage]` |
+| `detection` | KB-grounded anomaly detection with AI verification | `[detection]` |
 
 ## Built for Finance
 
-DataBridge Core is the open-source foundation of [DataBridge AI](https://github.com/datanexum/databridge-ai) -- a full platform for financial hierarchy management, dbt model generation, and enterprise data reconciliation with 268 MCP tools.
+DataBridge Core is the open-source foundation of [DataBridge AI](https://github.com/datanexum/databridge-ai) -- a full platform for financial hierarchy management, dbt model generation, and enterprise data reconciliation with 287 MCP tools.
 
 **How it works:** Upload your Chart of Accounts. Get a production-ready financial hierarchy and dbt models. Zero config.
 

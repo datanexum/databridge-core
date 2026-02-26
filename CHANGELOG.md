@@ -2,6 +2,26 @@
 
 All notable changes to `databridge-core` will be documented in this file.
 
+## [1.5.0] - 2026-02-26
+
+### Added
+- **Grounded Detection module** (`databridge_core.detection`): KB-grounded anomaly detection for financial data
+  - `detect_grounded()` — run KB-grounded regex detection on a single CSV file with Knowledge Base citations
+  - `detect_grounded_batch()` — batch detection across a directory of CSV files
+  - `record_feedback()` — record user feedback (confirm/dismiss) on detection findings for the learning loop
+  - `get_detection_stats()` — compute detection performance and learning statistics
+  - `detect_and_verify()` — full AI pipeline: KB rules → regex detection → LangGraph 3-node verification (Triage → Verify → Reconcile)
+  - `run_verification_graph()` — run AI verification on pre-computed candidate findings
+  - `load_detection_rules()` — load detection rules from Knowledge Base JSON files
+  - `apply_feedback_filter()` — filter findings based on historical feedback (auto-suppress false positives)
+  - 10 finding types: sign reversal, rounding discrepancy, missing/duplicate account, hierarchy break, naming violation, balance mismatch, formula anomaly, classification error, custom
+  - 5 severity levels: critical, high, medium, low, info
+  - Numeric outlier detection: statistical outlier analysis for rate/amount columns (inverted FX rates, decimal shifts)
+  - GraphRAG enrichment: optional Knowledge Graph context for flagged accounts
+  - Forensic RAG enrichment: optional historical finding similarity search
+  - Graceful fallback: deterministic heuristics when LangGraph/Claude API unavailable
+  - New optional dependency group: `pip install 'databridge-core[detection]'` for AI verification pipeline
+
 ## [1.4.0] - 2026-02-25
 
 ### Added

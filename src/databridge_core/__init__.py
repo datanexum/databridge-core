@@ -14,7 +14,7 @@ Quick start::
     print(comparison["statistics"]["match_rate_percent"], "% match rate")
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 # Reconciler
 from .reconciler import (
@@ -60,6 +60,27 @@ from .erp_detect import detect_erp, detect_erp_batch
 from .fraud_detect import detect_fraud, detect_fraud_batch
 from .fx_validate import validate_fx, validate_fx_batch
 from .standards_check import check_standards, check_standards_batch
+
+# Grounded Detection (lazy — optional langgraph for AI pipeline)
+def detect_grounded(*args, **kwargs):
+    """Run KB-grounded anomaly detection on a CSV file. Requires: Knowledge Base rules in data/knowledge/."""
+    from .detection import detect_grounded as _detect
+    return _detect(*args, **kwargs)
+
+def detect_grounded_batch(*args, **kwargs):
+    """Run KB-grounded detection on a batch of CSV files."""
+    from .detection import detect_grounded_batch as _batch
+    return _batch(*args, **kwargs)
+
+def record_feedback(*args, **kwargs):
+    """Record user feedback on a detection finding for the learning loop."""
+    from .detection import record_feedback as _fb
+    return _fb(*args, **kwargs)
+
+def get_detection_stats(*args, **kwargs):
+    """Get detection performance and learning statistics."""
+    from .detection import get_detection_stats as _stats
+    return _stats(*args, **kwargs)
 
 # Triage (lazy — requires openpyxl)
 def scan_and_classify(*args, **kwargs):
@@ -135,6 +156,11 @@ __all__ = [
     "validate_fx_batch",
     "check_standards",
     "check_standards_batch",
+    # Grounded Detection
+    "detect_grounded",
+    "detect_grounded_batch",
+    "record_feedback",
+    "get_detection_stats",
     # Triage
     "scan_and_classify",
     # Linker
