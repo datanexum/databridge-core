@@ -6,17 +6,35 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 
+def _read_file(file_path: str) -> pd.DataFrame:
+    """Read data file, detecting format by extension."""
+    ext = file_path.rsplit('.', 1)[-1].lower() if '.' in file_path else 'csv'
+    if ext in ('xlsx', 'xls'):
+        df = pd.read_excel(file_path)
+    elif ext == 'xlsb':
+        df = pd.read_excel(file_path, engine='pyxlsb')
+    elif ext == 'json':
+        df = pd.read_json(file_path)
+    elif ext == 'parquet':
+        df = pd.read_parquet(file_path)
+    else:
+        df = pd.read_csv(file_path)
+    # Coerce non-string column names (e.g. datetime objects from xlsx headers)
+    df.columns = [str(c) for c in df.columns]
+    return df
+
+
 def profile_data(source_path: str) -> Dict[str, Any]:
     """Analyze data structure and quality.
 
     Args:
-        source_path: Path to CSV file to profile.
+        source_path: Path to CSV, Excel, JSON, or Parquet file to profile.
 
     Returns:
         Dict with profiling statistics including structure type, cardinality,
         and data quality metrics.
     """
-    df = pd.read_csv(source_path)
+    df = _read_file(source_path)
 
     cardinality = df.nunique() / len(df)
 
@@ -62,8 +80,8 @@ def detect_schema_drift(
     Returns:
         Dict with schema differences including added, removed, and type-changed columns.
     """
-    df_a = pd.read_csv(source_a_path)
-    df_b = pd.read_csv(source_b_path)
+    df_a = _read_file(source_a_path)
+    df_b = _read_file(source_b_path)
 
     cols_a = set(df_a.columns)
     cols_b = set(df_b.columns)

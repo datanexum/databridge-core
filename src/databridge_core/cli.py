@@ -769,3 +769,167 @@ def standards_check(file_or_dir, standard, limit):
                 )
 
             console.print(table)
+
+
+@cli.command("link-entities")
+@click.argument("logic_dna_dir", type=click.Path(exists=True))
+@click.option("--output", "-o", default="data/linker", help="Output directory for entity map")
+@click.option("--threshold", "-t", default=0.65, type=float, help="Link threshold (default 0.65)")
+def link_entities_cmd(logic_dna_dir, output, threshold):
+    """Resolve entities across Logic DNA files."""
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+
+    from .linker import link_entities
+
+    console = Console()
+
+    with console.status("Linking entities..."):
+        result = link_entities(logic_dna_dir, output_dir=output, threshold=threshold)
+
+    if result.get("error"):
+        console.print(f"[red]Error: {result['error']}[/red]")
+        raise SystemExit(1)
+
+    summary = result.get("summary", {})
+    console.print(Panel(
+        f"[bold]Clusters: {summary.get('total_clusters', 0)}[/bold]  |  "
+        f"Mentions: {summary.get('total_mentions', 0)}  |  "
+        f"Links: {summary.get('total_links', 0)}  |  "
+        f"Conflicts: {summary.get('total_conflicts', 0)}  |  "
+        f"Files: {summary.get('files_processed', 0)}",
+        title="Entity Linking",
+    ))
+
+    sample = result.get("sample_clusters", [])
+    if sample:
+        table = Table(title=f"Top {len(sample)} Clusters")
+        table.add_column("Name", style="cyan")
+        table.add_column("Domain")
+        table.add_column("Mentions", justify="right")
+        table.add_column("Files", justify="right")
+        table.add_column("Confidence", justify="right")
+
+        for c in sample:
+            table.add_row(
+                c["canonical_name"][:40],
+                c.get("domain", ""),
+                str(c.get("mention_count", 0)),
+                str(c.get("file_count", 0)),
+                f"{c.get('avg_confidence', 0):.2f}",
+            )
+
+        console.print(table)
+
+
+@cli.command("expect")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--name", "-n", default=None, help="Suite name (defaults to filename)")
+@click.option("--output", "-o", default="data/expectations", help="Output directory")
+def expect_cmd(file, name, output):
+    """Generate data quality expectations from a file."""
+    from rich.console import Console
+    from rich.panel import Panel
+
+    from .profiler import generate_expectation_suite
+
+    console = Console()
+
+    with console.status("Generating expectations..."):
+        result = generate_expectation_suite(file, name=name, output_dir=output)
+
+    console.print(Panel(
+        f"[bold]Suite: {result['suite_name']}[/bold]  |  "
+        f"Expectations: {result['expectations_count']}  |  "
+        f"Output: {result['output_file']}",
+        title="Expectation Suite Generated",
+    ))
+
+
+@cli.command("validate")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--suite", "-s", required=True, help="Suite name or path to suite JSON")
+@click.option("--suite-dir", default="data/expectations", help="Suite directory")
+def validate_cmd(file, suite, suite_dir):
+    """Validate a data file against an expectation suite."""
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+
+    from .profiler import validate
+
+    console = Console()
+
+    suite_path = suite if suite.endswith(".json") else None
+    suite_name = None if suite_path else suite
+
+    with console.status("Validating..."):
+        result = validate(file, suite_path=suite_path, suite_name=suite_name, suite_dir=suite_dir)
+
+    status = result["status"]
+    style = "green" if status == "passed" else "red"
+
+    console.print(Panel(
+        f"[bold]Status: [{style}]{status.upper()}[/{style}][/bold]  |  "
+        f"Passed: {result['passed']}/{result['total_expectations']}  |  "
+        f"Success: {result['success_percent']}%  |  "
+        f"Duration: {result['duration_seconds']}s",
+        title=f"Validation: {result['suite_name']}",
+    ))
+
+    if result["failures"]:
+        table = Table(title="Failures")
+        table.add_column("Expectation", style="cyan")
+        table.add_column("Column")
+        table.add_column("Expected")
+        table.add_column("Observed", style="red")
+
+        for f in result["failures"]:
+            table.add_row(
+                f.get("expectation", ""),
+                f.get("column", ""),
+                str(f.get("expected", "")),
+                str(f.get("observed", f.get("detail", ""))),
+            )
+
+        console.print(table)
+
+
+@cli.command("query")
+@click.argument("sql")
+@click.option("--register", "-r", multiple=True, help="Register file as table: name=path")
+@click.option("--limit", "-l", default=10, type=int, help="Max preview rows")
+def query_cmd(sql, register, limit):
+    """Execute SQL against local files using DuckDB."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from .connectors import query_local
+
+    console = Console()
+
+    reg_files = {}
+    for r in register:
+        if "=" in r:
+            name, path = r.split("=", 1)
+            reg_files[name] = path
+
+    with console.status("Querying..."):
+        result = query_local(sql, register_files=reg_files or None, max_preview_rows=limit)
+
+    console.print(f"[bold]{result['rows_returned']} rows returned[/bold]")
+
+    if result.get("preview"):
+        table = Table()
+        cols = result.get("columns", [])
+        for c in cols:
+            table.add_column(c)
+
+        for row in result["preview"]:
+            table.add_row(*[str(row.get(c, "")) for c in cols])
+
+        console.print(table)
+
+        if result.get("truncated"):
+            console.print(f"[dim]... showing {limit} of {result['rows_returned']} rows[/dim]")

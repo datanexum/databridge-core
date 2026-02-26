@@ -2,6 +2,49 @@
 
 All notable changes to `databridge-core` will be documented in this file.
 
+## [1.4.0] - 2026-02-25
+
+### Added
+- **Entity Linker module** (`databridge_core.linker`): Cross-file entity resolution with financial synonym awareness
+  - `link_entities()` — resolve entities across Logic DNA files using composite scoring and Union-Find clustering
+  - `get_entity_map()` — retrieve a previously generated entity map
+  - `get_entity_cluster()` — retrieve a single cluster by ID
+  - `get_link_summary()` — summary statistics
+  - `find_entity()` — fuzzy search across linked clusters
+  - Composite scoring: name similarity (40%) + formula similarity (25%) + business meaning (25%) + archetype compatibility (10%)
+  - 60+ financial synonym sets covering GAAP/IFRS terminology (revenue/net sales, COGS/cost of sales, APIC/share premium, etc.)
+  - Jaccard token overlap for fallback names to prevent over-linking of descriptive texts
+  - Domain inference (revenue, expense, balance, margin, tax, intercompany, headcount)
+  - Conflict detection: formula mismatch, sign reversal
+  - Oversized cluster filtering (>100 mentions)
+- **Profiler enhancements** (`databridge_core.profiler`):
+  - `generate_expectation_suite()` — auto-generate data quality expectations from profiled data
+  - `list_expectation_suites()` — list persisted expectation suites
+  - `validate()` — validate data files against expectation suites
+  - `get_validation_results()` — get historical validation results
+  - Multi-format support: profiler and drift detection now support CSV, Excel (.xlsx/.xls/.xlsb), JSON, and Parquet
+- **Connectors module** (`databridge_core.connectors`): Local DuckDB SQL engine
+  - `query_local()` — execute SQL against local CSV/Parquet/JSON/Excel files
+  - `register_table()` — register a file as a named DuckDB table
+  - `list_tables()` — list registered tables in the DuckDB session
+  - `export_to_parquet()` — export query results or tables to Parquet format
+  - New `[duckdb]` optional extra: `pip install 'databridge-core[duckdb]'`
+  - New `[excel]` optional extra: `pip install 'databridge-core[excel]'`
+- 8 new exports in `__init__.py`: `generate_expectation_suite`, `list_expectation_suites`, `validate`, `get_validation_results`, `link_entities`, `find_entity`, `query_local`, `export_to_parquet`
+
+### Fixed
+- FX Validation: replaced tolerance-based stale detection with rate-period matching (closing/opening/average/historical)
+- FX Validation: added inversion product check (stated × expected ≈ 1.0) for more accurate inverted rate detection
+- FX Validation: renamed TB_IMBALANCE to CTA_MISCALCULATION for clarity
+- Standards Check: fixed dual-reporting detection priority (Dual > J-GAAP > US GAAP > IFRS)
+- Standards Check: added STANDARD_MISCLASSIFICATION for capitalized dev costs under GAAP (ASC 730)
+- Standards Check: added STANDARD_OPPORTUNITY for R&D expensing under IFRS (IAS 38.57)
+- Standards Check: deduplicate secondary findings when primary violation exists
+
+### Changed
+- Total exported functions: 30 → 38
+- New optional extras: `[duckdb]`, `[excel]`
+
 ## [1.3.0] - 2026-02-25
 
 ### Added

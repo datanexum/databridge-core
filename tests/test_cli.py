@@ -12,7 +12,7 @@ class TestCli:
     def test_version(self):
         result = self.runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "1.2.0" in result.output
+        assert "1.4.0" in result.output
 
     def test_help(self):
         result = self.runner.invoke(cli, ["--help"])

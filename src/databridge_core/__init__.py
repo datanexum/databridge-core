@@ -14,7 +14,7 @@ Quick start::
     print(comparison["statistics"]["match_rate_percent"], "% match rate")
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 # Reconciler
 from .reconciler import (
@@ -34,7 +34,14 @@ from .reconciler import (
 )
 
 # Profiler
-from .profiler import profile_data, detect_schema_drift
+from .profiler import (
+    profile_data,
+    detect_schema_drift,
+    generate_expectation_suite,
+    list_expectation_suites,
+    validate,
+    get_validation_results,
+)
 
 # Ingestion
 from .ingestion import load_csv, load_json, extract_pdf_text, parse_table_from_text
@@ -60,6 +67,28 @@ def scan_and_classify(*args, **kwargs):
     from .triage import scan_and_classify as _scan
     return _scan(*args, **kwargs)
 
+# Linker (lazy — entity linking for Logic DNA files)
+def link_entities(*args, **kwargs):
+    """Resolve entities across Logic DNA files. Cross-file entity linking with financial synonym awareness."""
+    from .linker import link_entities as _link
+    return _link(*args, **kwargs)
+
+def find_entity(*args, **kwargs):
+    """Fuzzy search for an entity across linked clusters."""
+    from .linker import find_entity as _find
+    return _find(*args, **kwargs)
+
+# Connectors (lazy — requires duckdb)
+def query_local(*args, **kwargs):
+    """Execute SQL against local files using DuckDB. Requires: pip install 'databridge-core[duckdb]'."""
+    from .connectors import query_local as _query
+    return _query(*args, **kwargs)
+
+def export_to_parquet(*args, **kwargs):
+    """Export query results or tables to Parquet format. Requires: pip install 'databridge-core[duckdb]'."""
+    from .connectors import export_to_parquet as _export
+    return _export(*args, **kwargs)
+
 __all__ = [
     "__version__",
     # Reconciler
@@ -79,6 +108,10 @@ __all__ = [
     # Profiler
     "profile_data",
     "detect_schema_drift",
+    "generate_expectation_suite",
+    "list_expectation_suites",
+    "validate",
+    "get_validation_results",
     # Ingestion
     "load_csv",
     "load_json",
@@ -104,4 +137,10 @@ __all__ = [
     "check_standards_batch",
     # Triage
     "scan_and_classify",
+    # Linker
+    "link_entities",
+    "find_entity",
+    # Connectors
+    "query_local",
+    "export_to_parquet",
 ]

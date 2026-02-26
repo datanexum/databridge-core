@@ -322,11 +322,13 @@ class TestFxValidate:
         path = tmp_path / "wrong_rate.csv"
         fieldnames = ["Account_ID", "Account_Name", "Account_Type", "Functional_Currency",
                        "Reporting_Currency", "Local_Balance", "FX_Rate", "FX_Rate_Type", "Translated_Balance"]
+        # Use the exact closing rate (1.0920) so it clearly matches closing period,
+        # not average (1.0885). Revenue accounts should use average rate.
         rows = [
             {"Account_ID": "4000", "Account_Name": "Revenue", "Account_Type": "Revenue",
              "Functional_Currency": "EUR", "Reporting_Currency": "USD",
-             "Local_Balance": "10000", "FX_Rate": "1.09", "FX_Rate_Type": "closing",
-             "Translated_Balance": "10900"},
+             "Local_Balance": "10000", "FX_Rate": "1.092", "FX_Rate_Type": "closing",
+             "Translated_Balance": "10920"},
         ]
         self._write_csv(path, rows, fieldnames)
 
@@ -613,7 +615,7 @@ class TestImports:
 
     def test_version_updated(self):
         from databridge_core import __version__
-        assert __version__ == "1.3.0"
+        assert __version__ == "1.4.0"
 
     def test_all_exports(self):
         import databridge_core
