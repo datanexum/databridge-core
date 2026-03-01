@@ -47,6 +47,8 @@ from ._types import (
     FindingType,
     GroundedFinding,
     Severity,
+    SPRTCertificate,
+    ThompsonState,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,4 +75,6 @@ __all__ = [
     "FindingType",
     "Severity",
     "FeedbackAction",
+    "ThompsonState",
+    "SPRTCertificate",
 ]

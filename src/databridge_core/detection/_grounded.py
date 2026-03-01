@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import math
 import os
 import re
 import time
@@ -25,7 +26,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ._feedback import apply_feedback_filter
-from ._rules import load_detection_rules
+
+try:
+    from ._rules_c import load_detection_rules  # Cython compiled
+except ImportError:
+    from ._rules import load_detection_rules  # Pure Python fallback
 from ._types import (
     DetectionContext,
     DetectionRule,
@@ -33,6 +38,7 @@ from ._types import (
     FindingType,
     GroundedFinding,
     Severity,
+    SPRTCertificate,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +52,70 @@ _MAX_FINDINGS_PER_FILE = 500
 # Maximum CSV rows to scan (safety limit for very large files).
 _MAX_ROWS = 100_000
 
+# -- SPRT (Sequential Probability Ratio Test) constants ----------------------
+_SPRT_P0 = 0.001       # Clean threshold (null hypothesis error rate)
+_SPRT_P1 = 0.01        # Anomalous threshold (alternative hypothesis error rate)
+_SPRT_ALPHA = 0.05     # False alarm rate
+_SPRT_BETA = 0.05      # Miss rate
+_SPRT_MIN_ROWS = 100   # Minimum rows before SPRT can decide
+_SPRT_A = math.log((1 - _SPRT_BETA) / _SPRT_ALPHA)   # Upper bound (anomalous)
+_SPRT_B = math.log(_SPRT_BETA / (1 - _SPRT_ALPHA))    # Lower bound (clean)
+
+
+class _SPRTState:
+    """Wald's Sequential Probability Ratio Test for early exit.
+
+    Tests H0 (error_rate <= P0, file is clean) against
+    H1 (error_rate >= P1, file is anomalous).
+
+    After each row, updates the log-likelihood ratio. If the ratio
+    drops below B (lower bound), the file is certified clean and
+    scanning stops early. If it exceeds A (upper bound), the file
+    is anomalous -- but we do NOT stop scanning because we want all
+    findings.
+    """
+
+    __slots__ = ("_llr", "_rows_checked", "_findings_count", "_decision")
+
+    def __init__(self):
+        self._llr = 0.0
+        self._rows_checked = 0
+        self._findings_count = 0
+        self._decision: Optional[str] = None  # None, "clean", "anomalous"
+
+    def update(self, has_finding: bool) -> None:
+        """Update SPRT state after scanning one row."""
+        self._rows_checked += 1
+        if has_finding:
+            self._findings_count += 1
+            # Log likelihood increment for finding: log(P1/P0)
+            self._llr += math.log(_SPRT_P1 / _SPRT_P0)
+        else:
+            # Log likelihood increment for no finding: log((1-P1)/(1-P0))
+            self._llr += math.log((1 - _SPRT_P1) / (1 - _SPRT_P0))
+
+        # Only decide after minimum rows
+        if self._rows_checked >= _SPRT_MIN_ROWS and self._decision is None:
+            if self._llr <= _SPRT_B:
+                self._decision = "clean"
+            elif self._llr >= _SPRT_A:
+                self._decision = "anomalous"
+
+    @property
+    def decision(self) -> Optional[str]:
+        return self._decision
+
+    def to_certificate(self, total_rows: int) -> SPRTCertificate:
+        return SPRTCertificate(
+            decision=self._decision or "continue",
+            rows_scanned=self._rows_checked,
+            total_rows=total_rows,
+            log_likelihood_ratio=round(self._llr, 6),
+            p0=_SPRT_P0,
+            p1=_SPRT_P1,
+            confidence_level=1 - _SPRT_ALPHA,
+        )
+
 
 def detect_grounded(
     file_path: str,
@@ -55,6 +125,9 @@ def detect_grounded(
     feedback_path: str = DEFAULT_FEEDBACK_PATH,
     output_dir: str = DEFAULT_OUTPUT_DIR,
     knowledge_dir: str = "data/knowledge",
+    min_confidence: float = 0.0,
+    feedback_strategy: str = "thompson",
+    early_exit: bool = True,
 ) -> Dict[str, Any]:
     """Run grounded detection on a single CSV file.
 
@@ -76,6 +149,14 @@ def detect_grounded(
         output_dir: Directory to write detection results JSON.
         knowledge_dir: Knowledge base directory (used when *rules* is
             ``None``).
+        min_confidence: Minimum rule confidence threshold. Rules below
+            this value are skipped (default ``0.0`` = no filtering).
+        feedback_strategy: Feedback suppression strategy --
+            ``"thompson"`` (default, Beta sampling) or ``"threshold"``
+            (legacy hard cutoff).
+        early_exit: Whether to use SPRT early exit for clean files.
+            When ``True``, scanning stops early if the file is
+            statistically certified clean (default ``True``).
 
     Returns:
         Dict with ``summary``, ``findings`` (up to 10 for context limit),
@@ -116,10 +197,12 @@ def detect_grounded(
         }
 
     # 3. Compile rule patterns (cache compiled regexes)
-    compiled_rules = _compile_rules(rules, headers)
+    compiled_rules = _compile_rules(rules, headers, min_confidence=min_confidence)
 
-    # 4. Run detection
+    # 4. Run detection (with optional SPRT early exit)
     raw_findings: List[GroundedFinding] = []
+    sprt = _SPRTState() if early_exit else None
+    rows_scanned = 0
 
     for row_idx, row in enumerate(rows):
         if len(raw_findings) >= _MAX_FINDINGS_PER_FILE:
@@ -133,6 +216,18 @@ def detect_grounded(
 
         row_findings = _check_row(row_idx, row, headers, compiled_rules)
         raw_findings.extend(row_findings)
+        rows_scanned += 1
+
+        if sprt:
+            sprt.update(has_finding=len(row_findings) > 0)
+            if sprt.decision == "clean":
+                logger.info(
+                    "SPRT certified %s clean after %d/%d rows",
+                    file_path, rows_scanned, len(rows),
+                )
+                break
+            # Note: anomalous decision does NOT stop scanning --
+            # we want all findings
 
     # 5. GraphRAG enrichment (optional)
     graphrag_enriched = 0
@@ -144,9 +239,25 @@ def detect_grounded(
     if use_graphrag and raw_findings:
         forensic_enriched = _enrich_with_forensic_rag(raw_findings)
 
+    # 5c. Runtime monitors
+    monitor_warnings: list = []
+    try:
+        from ._monitors import run_all_monitors
+        monitor_warnings = run_all_monitors(raw_findings)
+        if monitor_warnings:
+            from ._counterexamples import capture_counterexample
+            capture_counterexample(
+                file_path=file_path,
+                findings=[f.model_dump(mode="json") for f in raw_findings[:20]],
+                monitor_warnings=monitor_warnings,
+            )
+    except ImportError:
+        pass
+
     # 6. Apply feedback filter
     filtered_findings = apply_feedback_filter(
-        raw_findings, feedback_path=feedback_path
+        raw_findings, feedback_path=feedback_path,
+        strategy=feedback_strategy,
     )
     suppressed_count = len(raw_findings) - len(filtered_findings)
 
@@ -164,9 +275,11 @@ def detect_grounded(
         confidence_sum += f.confidence
 
     n = len(filtered_findings) or 1
+    sprt_cert = sprt.to_certificate(len(rows)) if sprt else None
     summary = DetectionSummary(
         file_path=file_path,
         total_rows=len(rows),
+        rows_scanned=rows_scanned,
         total_findings=len(filtered_findings),
         rules_applied=len(compiled_rules),
         severity_counts=severity_counts,
@@ -175,6 +288,7 @@ def detect_grounded(
         graphrag_enriched=graphrag_enriched,
         feedback_suppressed=suppressed_count,
         duration_seconds=round(duration, 2),
+        sprt_certificate=sprt_cert if sprt_cert and sprt_cert.decision == "clean" else None,
     )
 
     # 8. Persist results
@@ -196,7 +310,7 @@ def detect_grounded(
         f.model_dump(mode="json") for f in filtered_findings[:10]
     ]
 
-    return {
+    result = {
         "summary": summary.model_dump(mode="json"),
         "findings": sample_findings,
         "total_findings": len(filtered_findings),
@@ -208,6 +322,11 @@ def detect_grounded(
             else None
         ),
     }
+
+    if monitor_warnings:
+        result["monitor_warnings"] = monitor_warnings
+
+    return result
 
 
 def detect_grounded_batch(
@@ -406,12 +525,19 @@ def _read_csv(file_path: str) -> tuple:
 def _compile_rules(
     rules: List[DetectionRule],
     headers: List[str],
+    min_confidence: float = 0.0,
 ) -> List[tuple]:
     """Compile rule regex patterns and resolve field targets.
 
     For each rule, the field_targets are resolved against the actual CSV
-    headers. If a rule's field_targets are empty or none match, the rule
-    checks *all* columns.
+    headers. Rules whose field_targets are non-empty but none resolve
+    to actual columns are skipped entirely (they are irrelevant to this
+    file and would cause false-positive noise via all-column fallback).
+
+    Args:
+        rules: Detection rules to compile.
+        headers: CSV column headers from the target file.
+        min_confidence: Skip rules with confidence below this threshold.
 
     Returns:
         List of (rule, compiled_regex, resolved_fields) tuples.
@@ -421,6 +547,9 @@ def _compile_rules(
 
     for rule in rules:
         if not rule.pattern:
+            continue
+
+        if rule.confidence < min_confidence:
             continue
 
         try:
@@ -443,8 +572,12 @@ def _compile_rules(
                     resolved.append(target)
                 elif target.lower() in header_lower:
                     resolved.append(header_lower[target.lower()])
-            # If no targets resolved, fall back to all columns
-            fields = resolved if resolved else headers
+            # If none of the rule's field_targets exist in this file,
+            # the rule is irrelevant -- skip it.  Falling back to every
+            # column causes massive false-positive noise.
+            if not resolved:
+                continue
+            fields = resolved
         else:
             fields = headers
 

@@ -134,11 +134,42 @@ class FeedbackRecord(BaseModel):
 # -- Summary models -----------------------------------------------------------
 
 
+class ThompsonState(BaseModel):
+    """Thompson Sampling state for a (rule_id, finding_type) pair.
+
+    Models each rule's reliability as a Beta(alpha, beta) distribution.
+    alpha = confirmed + 1 (prior), beta = dismissed + 1 (prior).
+    """
+
+    rule_id: str = ""
+    finding_type: str = ""
+    alpha: float = 1.0  # confirmed + 1
+    beta: float = 1.0   # dismissed + 1
+    expected_theta: float = 0.5  # alpha / (alpha + beta)
+    suppressed: bool = False
+
+
+class SPRTCertificate(BaseModel):
+    """Certificate from Sequential Probability Ratio Test early exit.
+
+    Issued when SPRT certifies a file as clean before all rows are scanned.
+    """
+
+    decision: str = "clean"  # "clean" or "continue"
+    rows_scanned: int = 0
+    total_rows: int = 0
+    log_likelihood_ratio: float = 0.0
+    p0: float = 0.001  # null hypothesis error rate
+    p1: float = 0.01   # alternative hypothesis error rate
+    confidence_level: float = 0.95
+
+
 class DetectionSummary(BaseModel):
     """Summary of a single-file detection run."""
 
     file_path: str = ""
     total_rows: int = 0
+    rows_scanned: int = 0
     total_findings: int = 0
     rules_applied: int = 0
     severity_counts: Dict[str, int] = Field(default_factory=dict)
@@ -147,6 +178,7 @@ class DetectionSummary(BaseModel):
     graphrag_enriched: int = 0
     feedback_suppressed: int = 0
     duration_seconds: float = 0.0
+    sprt_certificate: Optional[SPRTCertificate] = None
 
 
 class DetectionBatchSummary(BaseModel):

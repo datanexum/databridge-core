@@ -19,6 +19,7 @@ from ._types import (
     FeedbackAction,
     FeedbackRecord,
     GroundedFinding,
+    ThompsonState,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,17 +100,56 @@ def record_feedback(
     }
 
 
+def _thompson_should_suppress(
+    confirmed: int,
+    dismissed: int,
+    min_trust: float = 0.1,
+    seed: Optional[int] = None,
+) -> tuple:
+    """Determine if a rule should be suppressed using Thompson Sampling.
+
+    Models the rule's reliability as Beta(confirmed+1, dismissed+1) and
+    draws a sample theta. If theta < min_trust, the rule is suppressed.
+    Unlike the hard threshold approach, this allows concept drift recovery:
+    even heavily dismissed rules have a small but nonzero chance of
+    remaining active, letting them recover if the underlying data changes.
+
+    Args:
+        confirmed: Number of times this rule was confirmed.
+        dismissed: Number of times this rule was dismissed.
+        min_trust: Minimum sampled theta to keep the rule active.
+        seed: Optional RNG seed for deterministic testing.
+
+    Returns:
+        Tuple of (should_suppress: bool, theta: float).
+    """
+    import random
+
+    rng = random.Random(seed)
+    alpha = confirmed + 1
+    beta_param = dismissed + 1
+    theta = rng.betavariate(alpha, beta_param)
+    return theta < min_trust, theta
+
+
 def apply_feedback_filter(
     findings: List[GroundedFinding],
     feedback_path: str = DEFAULT_FEEDBACK_PATH,
+    strategy: str = "thompson",
+    min_trust: float = 0.1,
+    seed: Optional[int] = None,
 ) -> List[GroundedFinding]:
     """Filter and adjust findings based on historical feedback.
 
     Applies two transformations:
 
     1. **Suppression** -- Findings whose ``(rule_id, finding_type)``
-       combination has been dismissed more than :data:`_SUPPRESS_THRESHOLD`
-       times with zero confirmations are removed.
+       combination is deemed unreliable are removed. The suppression
+       strategy is controlled by the *strategy* parameter:
+       - ``"thompson"`` (default): Beta distribution sampling; suppresses
+         when sampled theta < *min_trust*. Allows concept drift recovery.
+       - ``"threshold"`` (legacy): Hard cutoff at >3 dismissals with 0
+         confirmations.
     2. **Confidence adjustment** -- For non-suppressed findings, the
        confidence score is boosted or reduced based on the net feedback
        tally for the matching rule.
@@ -118,6 +158,9 @@ def apply_feedback_filter(
         findings: List of :class:`GroundedFinding` objects from the
             current detection run.
         feedback_path: Path to the feedback JSONL file.
+        strategy: Suppression strategy -- ``"thompson"`` or ``"threshold"``.
+        min_trust: Minimum sampled theta for Thompson strategy (default 0.1).
+        seed: Optional RNG seed for deterministic Thompson sampling.
 
     Returns:
         Filtered and confidence-adjusted list of findings.
@@ -145,13 +188,24 @@ def apply_feedback_filter(
         dismissed = tally["dismissed"]
 
         # Suppression check
-        if dismissed > _SUPPRESS_THRESHOLD and confirmed == 0:
+        if strategy == "thompson":
+            suppress, _theta = _thompson_should_suppress(
+                confirmed, dismissed, min_trust=min_trust, seed=seed
+            )
+        else:
+            # Legacy threshold strategy
+            suppress = dismissed > _SUPPRESS_THRESHOLD and confirmed == 0
+
+        if suppress:
             suppressed_count += 1
             logger.debug(
-                "Suppressed finding %s (rule=%s, type=%s): %d dismissals, 0 confirmations",
+                "Suppressed finding %s (rule=%s, type=%s, strategy=%s): "
+                "%d confirmed, %d dismissed",
                 finding.finding_id,
                 finding.rule_id,
                 finding.finding_type.value,
+                strategy,
+                confirmed,
                 dismissed,
             )
             continue
@@ -169,7 +223,8 @@ def apply_feedback_filter(
 
     if suppressed_count > 0:
         logger.info(
-            "Feedback filter suppressed %d of %d findings",
+            "Feedback filter (%s) suppressed %d of %d findings",
+            strategy,
             suppressed_count,
             len(findings),
         )
@@ -221,7 +276,7 @@ def get_detection_stats(
         else:
             active += 1
 
-    # Per-rule detail (top 10 most reviewed)
+    # Per-rule detail (top 10 most reviewed) with Thompson state
     rule_details: List[Dict[str, Any]] = []
     for key, tally in sorted(
         tallies.items(), key=lambda kv: kv[1]["total"], reverse=True
@@ -229,6 +284,18 @@ def get_detection_stats(
         rule_id, finding_type = key
         is_suppressed = (
             tally["dismissed"] > _SUPPRESS_THRESHOLD and tally["confirmed"] == 0
+        )
+        # Thompson Sampling state
+        alpha = tally["confirmed"] + 1
+        beta_param = tally["dismissed"] + 1
+        expected_theta = round(alpha / (alpha + beta_param), 4)
+        thompson = ThompsonState(
+            rule_id=rule_id,
+            finding_type=finding_type,
+            alpha=alpha,
+            beta=beta_param,
+            expected_theta=expected_theta,
+            suppressed=expected_theta < 0.1,
         )
         rule_details.append({
             "rule_id": rule_id,
@@ -238,6 +305,7 @@ def get_detection_stats(
             "total": tally["total"],
             "suppressed": is_suppressed,
             "net_score": tally["confirmed"] - tally["dismissed"],
+            "thompson_state": thompson.model_dump(),
         })
 
     return {
