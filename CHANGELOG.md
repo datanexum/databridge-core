@@ -2,6 +2,17 @@
 
 All notable changes to `databridge-core` will be documented in this file.
 
+## [1.5.2] - 2026-02-28
+
+### Changed
+- Server-side (not in this package): Build 4 — KB Graph Enhancement + Enhanced Pattern Abstraction
+  - Graph schema: Evidence, MappingDecision, ReconCheck entity types + RelationshipType enum
+  - Evidence trail pipeline: MappingDecision + Evidence nodes with JUSTIFIED_BY edges
+  - Graph quality gates: cycle detection, depth bounds, orphan checks, evidence coverage, DAG validation
+  - Enhanced pattern safety: 10 checks (geographic, contact, volume/monetary bucketing, k-anonymity, differential privacy)
+  - 2 new tools: `ingest_shared_patterns`, `seed_from_shared_library`. CE tools 302→304, Enterprise 367→369
+- No library code changes; version bump for changelog only
+
 ## [1.5.1] - 2026-02-28
 
 ### Changed
