@@ -131,7 +131,7 @@ pip install 'databridge-core[dev]'      # Development tools (pytest, ruff, build
 
 ## Built for Finance
 
-DataBridge Core is the open-source foundation of [DataBridge AI](https://github.com/datanexum/databridge-ai) -- a full platform for financial hierarchy management, dbt model generation, and enterprise data reconciliation with 287 MCP tools.
+DataBridge Core is the open-source foundation of [DataBridge AI](https://github.com/datanexum/databridge-ai) -- a full platform for financial hierarchy management, dbt model generation, and enterprise data reconciliation with 297 MCP tools.
 
 **How it works:** Upload your Chart of Accounts. Get a production-ready financial hierarchy and dbt models. Zero config.
 

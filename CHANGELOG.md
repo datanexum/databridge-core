@@ -2,6 +2,12 @@
 
 All notable changes to `databridge-core` will be documented in this file.
 
+## [1.5.1] - 2026-02-28
+
+### Changed
+- Server-side (not in this package): planner gains online decision-making — VOI clarifications, Thompson Sampling strategy selection, Monte Carlo rollout planning
+- No library code changes; version bump for changelog only
+
 ## [1.5.0] - 2026-02-26
 
 ### Added
