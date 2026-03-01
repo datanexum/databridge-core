@@ -5,6 +5,7 @@ All notable changes to `databridge-core` will be documented in this file.
 ## [1.5.1] - 2026-02-28
 
 ### Changed
+- Server-side (not in this package): 5 new evaluation tools — falsification search, property checks, failure clustering, failure rate estimation, release dashboard (Build 3 validation harness). CE tools 297→302, Enterprise 362→367
 - Server-side (not in this package): planner gains online decision-making — VOI clarifications, Thompson Sampling strategy selection, Monte Carlo rollout planning
 - No library code changes; version bump for changelog only
 
